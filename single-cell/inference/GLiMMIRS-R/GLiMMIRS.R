@@ -18,71 +18,38 @@ perform_GLiMMIRS <- function(mudata_input_fp, mudata_output_fp) {
   }
   SummarizedExperiment::assayNames(mudata[['guide']])[[1]] <- 'counts'
 
-  # get S phase and G2M phase genes from Seurat
-  s_genes <- Seurat::cc.genes$s.genes
-  g2m_genes <- Seurat::cc.genes$g2m.genes
+  # # get S phase and G2M phase genes from Seurat
+  # s_genes <- Seurat::cc.genes$s.genes
+  # g2m_genes <- Seurat::cc.genes$g2m.genes
 
-  # separate expression matrix to get gene names
-  expr_matrix <- SummarizedExperiment::assay(
-    mudata[['gene']],
-    'counts'
-  )
-  ensembl_gene_ids <- rownames(expr_matrix)
+  # # separate expression matrix to get gene names
+  # expr_matrix <- SummarizedExperiment::assay(
+  #   mudata[['gene']],
+  #   'counts'
+  # )
 
-  # use BioMart to convert Ensembl gene IDs to HGNC symbols
-  mart <- biomaRt::useMart('ensembl')
-  mart <- biomaRt::useDataset('hsapiens_gene_ensembl', mart)
-  gene_hgnc_symbols <- biomaRt::getBM(
-    filters = 'ensembl_gene_id',
-    attributes = c('ensembl_gene_id', 'hgnc_symbol'),
-    values = ensembl_gene_ids,
-    mart = mart
-  )
+  # # set rownames of expression matrix to HGNC symbols for Seurat
+  # hgnc_symbols <- SummarizedExperiment::rowData(mudata[['gene']])$symbol
+  # for (i in 1:length(hgnc_symbols)) {
+  #   if (hgnc_symbols[i] == '') {
+  #     hgnc_symbols[i] <- rownames(expr_matrix)[i]
+  #   }
+  # }
+  # rownames(expr_matrix) <- hgnc_symbols
 
-  # merge with original gene symbols to retain gene ordering
-  gene_ensembl_hgnc <- merge(
-    data.frame(ensembl_gene_ids),
-    gene_hgnc_symbols,
-    all.x = TRUE,
-    by.x = 'ensembl_gene_ids',
-    by.y = 'ensembl_gene_id',
-    sort = FALSE
-  )
+  # # initialize Seurat object with count data
+  # seurat_obj <- Seurat::CreateSeuratObject(
+  #   counts = expr_matrix
+  # )
 
-  # merge again to handle NA values (if applicable)
-  gene_ensembl_hgnc <- merge(
-    data.frame(ensembl_gene_ids),
-    gene_ensembl_hgnc,
-    by = 'ensembl_gene_ids',
-    sort = FALSE
-  )
+  # # perform Seurat preprocessing
+  # seurat_obj <- Seurat::NormalizeData(seurat_obj)
+  # seurat_obj <- Seurat::FindVariableFeatures(seurat_obj, selection.method = 'vst')
+  # seurat_obj <- Seurat::ScaleData(seurat_obj, features = rownames(seurat_obj))
 
-  # input Ensembl gene IDs for genes without HGNC
-  for (i in 1:nrow(gene_ensembl_hgnc)) {
-    if (gene_ensembl_hgnc[i, 'hgnc_symbol'] == '') {
-      gene_ensembl_hgnc[i, 'hgnc_symbol'] = gene_ensembl_hgnc[
-        i, 
-        'ensembl_gene_ids'
-      ]
-    }
-  }
-
-  # set rownames of expression matrix to HGNC symbols for Seurat
-  rownames(expr_matrix) <- gene_ensembl_hgnc$hgnc_symbol
-
-  # initialize Seurat object with count data
-  seurat_obj <- Seurat::CreateSeuratObject(
-    counts = expr_matrix
-  )
-
-  # perform Seurat preprocessing
-  seurat_obj <- Seurat::NormalizeData(seurat_obj)
-  seurat_obj <- Seurat::FindVariableFeatures(seurat_obj, selection.method = 'vst')
-  seurat_obj <- Seurat::ScaleData(seurat_obj, features = rownames(seurat_obj))
-
-  # compute percent mitochondrial reads
-  seurat_obj[["percent.mt"]] <- Seurat::PercentageFeatureSet(seurat_obj, pattern = "^MT-")
-  percent_mito <- seurat_obj@meta.data$percent.mt
+  # # compute percent mitochondrial reads
+  # seurat_obj[["percent.mt"]] <- Seurat::PercentageFeatureSet(seurat_obj, pattern = "^MT-")
+  # percent_mito <- seurat_obj@meta.data$percent.mt
   
   # perform cell cycle scoring
   # seurat_obj <- Seurat::CellCycleScoring(
@@ -91,6 +58,9 @@ perform_GLiMMIRS <- function(mudata_input_fp, mudata_output_fp) {
   #   g2m.features = g2m_genes,
   #   set.ident = TRUE
   # )
+
+  # get cell-level covariates
+  cell_covariates <- SummarizedExperiment::colData(mudata)
 
   # get MOI
   moi <- MultiAssayExperiment::metadata(mudata[["guide"]])$moi
@@ -149,7 +119,7 @@ perform_GLiMMIRS <- function(mudata_input_fp, mudata_output_fp) {
     umis_per_cell <- umis_per_cell[, 'total_gene_umis']
         
     # create modeling data frame
-    model_df <- data.frame(cbind(element_targeted, gene_expression, umis_per_cell, percent_mito))
+    model_df <- data.frame(cbind(element_targeted, gene_expression, umis_per_cell, cell_covariates))
 
     # subset cells in low MOI case - cells with guide and NT guide
     if (moi == "low") {
@@ -157,7 +127,14 @@ perform_GLiMMIRS <- function(mudata_input_fp, mudata_output_fp) {
     }
     
     # run negative binomial regression
-    mdl <- MASS::glm.nb(gene_expression ~ element_targeted + offset(log(umis_per_cell)), model_df)
+    model_formula <- 'gene_expression ~ element_targeted + '
+    for (i in 1:length(colnames(cell_covariates))) {
+      model_formula <- paste0(model_formula, colnames(cell_covariates)[i], ' + ')
+    }
+    model_formula <- paste0(model_formula, 'offset(log(umis_per_cell))')
+    model_formula <- as.formula(model_formula)
+
+    mdl <- MASS::glm.nb(model_formula, model_df)
 
     # save L2FC and p-value
     mdl.coeffs <- summary(mdl)$coefficients
