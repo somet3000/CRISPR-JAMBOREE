@@ -81,12 +81,12 @@ perform_GLiMMIRS <- function(mudata_input_fp, mudata_output_fp) {
   seurat_obj <- Seurat::ScaleData(seurat_obj, features = rownames(seurat_obj))
   
   # perform cell cycle scoring
-  seurat_obj <- Seurat::CellCycleScoring(
-    seurat_obj,
-    s.features = s_genes,
-    g2m.features = g2m_genes,
-    set.ident = TRUE
-  )
+  # seurat_obj <- Seurat::CellCycleScoring(
+  #   seurat_obj,
+  #   s.features = s_genes,
+  #   g2m.features = g2m_genes,
+  #   set.ident = TRUE
+  # )
 
   # get MOI
   moi <- MultiAssayExperiment::metadata(mudata[["guide"]])$moi
