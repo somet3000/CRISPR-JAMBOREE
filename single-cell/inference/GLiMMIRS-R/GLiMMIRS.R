@@ -79,6 +79,10 @@ perform_GLiMMIRS <- function(mudata_input_fp, mudata_output_fp) {
   seurat_obj <- Seurat::NormalizeData(seurat_obj)
   seurat_obj <- Seurat::FindVariableFeatures(seurat_obj, selection.method = 'vst')
   seurat_obj <- Seurat::ScaleData(seurat_obj, features = rownames(seurat_obj))
+
+  # compute percent mitochondrial reads
+  seurat_obj[["percent.mt"]] <- Seurat::PercentageFeatureSet(seurat_obj, pattern = "^MT-")
+  percent_mito <- seurat_obj@meta.data$percent.mt
   
   # perform cell cycle scoring
   # seurat_obj <- Seurat::CellCycleScoring(
@@ -145,7 +149,7 @@ perform_GLiMMIRS <- function(mudata_input_fp, mudata_output_fp) {
     umis_per_cell <- umis_per_cell[, 'total_gene_umis']
         
     # create modeling data frame
-    model_df <- data.frame(cbind(element_targeted, gene_expression, umis_per_cell))
+    model_df <- data.frame(cbind(element_targeted, gene_expression, umis_per_cell, percent_mito))
 
     # subset cells in low MOI case - cells with guide and NT guide
     if (moi == "low") {
